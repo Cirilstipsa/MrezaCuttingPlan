@@ -17,6 +17,15 @@ namespace MrezaCuttingPlan.Models
         /// <summary>Dužina komada u centimetrima.</summary>
         public double Length { get; set; }
 
+        /// <summary>Naziv particije iz FabricArea host elementa.</summary>
+        public string Partition { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Težina mreže u kg/m² pročitana iz Revit FabricSheetType.
+        /// 0 = parametar nije pronađen, koristiti aproksimativnu formulu.
+        /// </summary>
+        public double WeightKgPerM2 { get; set; }
+
         /// <summary>
         /// True za Q mreže (mogu se rotirati 90°),
         /// False za R mreže (imaju smjer žica, ne smiju se rotirati).

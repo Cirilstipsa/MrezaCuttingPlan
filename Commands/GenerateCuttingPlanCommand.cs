@@ -4,11 +4,11 @@ using Autodesk.Revit.UI;
 using MrezaCuttingPlan.Models;
 using MrezaCuttingPlan.Services;
 using MrezaCuttingPlan.UI;
-using System.Diagnostics;
+using System.IO;
 
 namespace MrezaCuttingPlan.Commands
 {
-    [Transaction(TransactionMode.ReadOnly)]
+    [Transaction(TransactionMode.Manual)]
     [Regeneration(RegenerationOption.Manual)]
     public class GenerateCuttingPlanCommand : IExternalCommand
     {
@@ -31,7 +31,6 @@ namespace MrezaCuttingPlan.Commands
 
                 double sheetW = dialog.SheetWidth;
                 double sheetL = dialog.SheetLength;
-                string pdfPath = dialog.PdfOutputPath!;
 
                 // 2. Ekstrahiraj FabricSheet elemente
                 var extractor = new FabricSheetExtractor();
@@ -45,7 +44,7 @@ namespace MrezaCuttingPlan.Commands
                     return Result.Succeeded;
                 }
 
-                // Provjeri preglomazne komade
+                // 3. Provjeri preglomazne komade
                 var optimizer = new CuttingOptimizer();
                 var oversized = optimizer.FindOversized(allPieces, sheetW, sheetL);
 
@@ -70,57 +69,65 @@ namespace MrezaCuttingPlan.Commands
                         return Result.Cancelled;
                 }
 
-                // 3. Grupiraj po tipu mreže
+                // 4. Grupiraj po (Particija, Tip) i optimiziraj
                 var grouped = allPieces
                     .Where(p => !oversized.Contains(p))
-                    .GroupBy(p => p.TypeName)
+                    .GroupBy(p => (p.Partition, p.TypeName))
                     .ToDictionary(g => g.Key, g => g.ToList());
 
-                // 4. Optimiziraj raspored za svaki tip
-                var resultsByType = new Dictionary<string, List<CuttingSheet>>();
-
+                var resultsByType = new Dictionary<(string Partition, string TypeName), List<CuttingSheet>>();
                 foreach (var kvp in grouped)
                 {
-                    var sheets = optimizer.Optimize(kvp.Value, sheetW, sheetL, kvp.Key);
+                    var sheets = optimizer.Optimize(kvp.Value, sheetW, sheetL, kvp.Key.TypeName);
                     resultsByType[kvp.Key] = sheets;
                 }
 
-                // 5. Generiraj PDF
-                string projectName = GetProjectName(doc);
-                var exporter = new PdfExporter();
-                exporter.Export(resultsByType, projectName, pdfPath);
+                // 5. Kreiraj Drafting View tablicu
+                // WeightKgPerM2: uzimamo prvu pozitivnu vrijednost iz grupe
+                // (svi komadi iste grupe imaju isti FabricSheetType → isti weight).
+                // Ako nijedan nema weight iz Revita (= 0), exporter koristi formulu.
+                var tableRows = resultsByType
+                    .Select(kvp =>
+                    {
+                        double wKgM2 = grouped[kvp.Key]
+                            .Select(p => p.WeightKgPerM2)
+                            .FirstOrDefault(w => w > 0);
+                        return (kvp.Key.Partition, kvp.Key.TypeName, kvp.Value.Count, wKgM2);
+                    })
+                    .OrderBy(r => r.Partition)
+                    .ThenBy(r => r.TypeName)
+                    .ToList();
 
-                // 6. Sažetak i otvaranje PDF-a
+                RevitViewExporter.Export(doc, tableRows, sheetW, sheetL);
+
+                // 6. Prikazi summary u dijalogu
+                string projectName = Path.GetFileNameWithoutExtension(doc.PathName);
+                if (string.IsNullOrWhiteSpace(projectName))
+                    projectName = "Neimenovani projekt";
+
                 int totalPieces = grouped.Values.Sum(l => l.Count);
                 int totalSheets = resultsByType.Values.Sum(l => l.Count);
 
-                string summary = $"Plan rezanja uspješno generiran!\n\n" +
+                string summary = $"Projekt: {projectName}\n" +
+                                 $"Standardni lim: {sheetW:F0}×{sheetL:F0} cm\n\n" +
                                  $"Ukupno komada: {totalPieces}\n" +
-                                 $"Ukupno standardnih limova: {totalSheets}\n\n";
+                                 $"Ukupno standardnih limova: {totalSheets}\n" +
+                                 $"──────────────────────────\n";
 
-                foreach (var kvp in resultsByType)
+                foreach (var kvp in resultsByType.OrderBy(k => k.Key.Partition).ThenBy(k => k.Key.TypeName))
                 {
                     double avgWaste = kvp.Value.Average(s => s.WastePercent);
-                    summary += $"  {kvp.Key}: {kvp.Value.Sum(s => s.PlacedPieces.Count)} kom, " +
-                               $"{kvp.Value.Count} limova, otpad {avgWaste:F1}%\n";
+                    int komada = kvp.Value.Sum(s => s.PlacedPieces.Count);
+                    string label = string.IsNullOrEmpty(kvp.Key.Partition) || kvp.Key.Partition == "Bez particije"
+                        ? kvp.Key.TypeName
+                        : $"{kvp.Key.Partition} / {kvp.Key.TypeName}";
+                    summary += $"{label}: {komada} kom → {kvp.Value.Count} limova " +
+                               $"(otpad {avgWaste:F1}%)\n";
                 }
 
-                summary += $"\nPDF: {pdfPath}";
+                summary += "\nView 'Plan Rezanja Mreža' kreiran u Project Browser-u.";
 
-                var resultDialog = new TaskDialog("Plan Rezanja Mreža – Završeno")
-                {
-                    MainContent = summary,
-                    CommonButtons = TaskDialogCommonButtons.Close
-                };
-                resultDialog.AddCommandLink(
-                    TaskDialogCommandLinkId.CommandLink1,
-                    "Otvori PDF izvještaj");
-
-                var dlgResult = resultDialog.Show();
-                if (dlgResult == TaskDialogResult.CommandLink1)
-                {
-                    Process.Start(new ProcessStartInfo(pdfPath) { UseShellExecute = true });
-                }
+                TaskDialog.Show("Plan Rezanja Mreža – Rezultat", summary);
 
                 return Result.Succeeded;
             }
@@ -130,26 +137,6 @@ namespace MrezaCuttingPlan.Commands
                 TaskDialog.Show("Plan Rezanja – Greška", message);
                 return Result.Failed;
             }
-        }
-
-        private static string GetProjectName(Document doc)
-        {
-            try
-            {
-                var info = doc.ProjectInformation;
-                string name = info?.Name ?? string.Empty;
-                string number = info?.Number ?? string.Empty;
-
-                if (!string.IsNullOrWhiteSpace(number) && !string.IsNullOrWhiteSpace(name))
-                    return $"{number} – {name}";
-                if (!string.IsNullOrWhiteSpace(name))
-                    return name;
-                if (!string.IsNullOrWhiteSpace(number))
-                    return number;
-            }
-            catch { }
-
-            return Path.GetFileNameWithoutExtension(doc.PathName) ?? "Neimenovani projekt";
         }
     }
 }
