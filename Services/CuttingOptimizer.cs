@@ -35,10 +35,10 @@ namespace MrezaCuttingPlan.Services
             foreach (var piece in sorted)
             {
                 // Provjeri da li je komad veći od standardnog lima
-                bool fitNormal = piece.Width <= sheetW + 1e-6 && piece.Length <= sheetL + 1e-6;
+                bool fitNormal = piece.Width <= sheetW + 0.5 && piece.Length <= sheetL + 0.5;
                 bool fitRotated = piece.CanRotate &&
-                                  piece.Length <= sheetW + 1e-6 &&
-                                  piece.Width <= sheetL + 1e-6;
+                                  piece.Length <= sheetW + 0.5 &&
+                                  piece.Width <= sheetL + 0.5;
 
                 if (!fitNormal && !fitRotated)
                 {
@@ -98,10 +98,10 @@ namespace MrezaCuttingPlan.Services
         {
             return pieces.Where(p =>
             {
-                bool fitNormal = p.Width <= sheetW + 1e-6 && p.Length <= sheetL + 1e-6;
+                bool fitNormal = p.Width <= sheetW + 0.5 && p.Length <= sheetL + 0.5;
                 bool fitRotated = p.CanRotate &&
-                                  p.Length <= sheetW + 1e-6 &&
-                                  p.Width <= sheetL + 1e-6;
+                                  p.Length <= sheetW + 0.5 &&
+                                  p.Width <= sheetL + 0.5;
                 return !fitNormal && !fitRotated;
             }).ToList();
         }

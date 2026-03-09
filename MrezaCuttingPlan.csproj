@@ -9,7 +9,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <UseWPF>true</UseWPF>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="QuestPDF" Version="2024.*" />
+    <PackageReference Include="System.Drawing.Common" Version="8.*" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Revit API – Private=false, ne kopira u output -->
@@ -23,23 +29,19 @@
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- PDF generacija -->
-    <PackageReference Include="QuestPDF" Version="2024.*" />
-  </ItemGroup>
-
-  <!-- PostBuildEvent: automatski kopira DLL i deps u Revit Addins folder -->
+  <!-- PostBuildEvent: kopira sve iz output direktorija u Revit Addins folder -->
   <Target Name="CopyToRevitAddins" AfterTargets="Build">
     <PropertyGroup>
       <RevitAddinsDir>$(APPDATA)\Autodesk\Revit\Addins\2026\MrezaCuttingPlan\</RevitAddinsDir>
+      <BuildOutDir>$(MSBuildProjectDirectory)\$(OutputPath)</BuildOutDir>
     </PropertyGroup>
     <MakeDir Directories="$(RevitAddinsDir)" />
-    <Copy SourceFiles="$(OutputPath)MrezaCuttingPlan.dll"
-          DestinationFolder="$(RevitAddinsDir)"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
-    <Copy SourceFiles="@(ReferenceCopyLocalPaths)"
-          DestinationFolder="$(RevitAddinsDir)"
+    <ItemGroup>
+      <_FilesToDeploy Include="$(BuildOutDir)**\*"
+                      Exclude="$(BuildOutDir)**\RevitAPI.dll;$(BuildOutDir)**\RevitAPIUI.dll;$(BuildOutDir)**\*.pdb;$(BuildOutDir)**\*.xml" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_FilesToDeploy)"
+          DestinationFiles="@(_FilesToDeploy->'$(RevitAddinsDir)%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
           ContinueOnError="true" />
   </Target>

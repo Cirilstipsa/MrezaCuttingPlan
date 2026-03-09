@@ -96,7 +96,7 @@ namespace MrezaCuttingPlan.Algorithms
 
             foreach (var fr in _freeRects)
             {
-                if (fr.Width >= w - 1e-6 && fr.Height >= l - 1e-6)
+                if (fr.Width >= w - 0.5 && fr.Height >= l - 0.5)
                 {
                     double leftoverW = fr.Width - w;
                     double leftoverL = fr.Height - l;
@@ -131,7 +131,7 @@ namespace MrezaCuttingPlan.Algorithms
             if (splitHorizontal)
             {
                 // Desni pravokutnik (puna visina slobodnog)
-                if (rightW > 1e-6)
+                if (rightW > 0.5)
                 {
                     _freeRects.Add(new Rect(
                         freeRect.X + usedRect.Width,
@@ -141,7 +141,7 @@ namespace MrezaCuttingPlan.Algorithms
                     ));
                 }
                 // Gornji pravokutnik (samo širina korištenog komada)
-                if (topH > 1e-6)
+                if (topH > 0.5)
                 {
                     _freeRects.Add(new Rect(
                         freeRect.X,
@@ -154,7 +154,7 @@ namespace MrezaCuttingPlan.Algorithms
             else
             {
                 // Gornji pravokutnik (puna širina slobodnog)
-                if (topH > 1e-6)
+                if (topH > 0.5)
                 {
                     _freeRects.Add(new Rect(
                         freeRect.X,
@@ -164,7 +164,7 @@ namespace MrezaCuttingPlan.Algorithms
                     ));
                 }
                 // Desni pravokutnik (samo visina korištenog komada)
-                if (rightW > 1e-6)
+                if (rightW > 0.5)
                 {
                     _freeRects.Add(new Rect(
                         freeRect.X + usedRect.Width,

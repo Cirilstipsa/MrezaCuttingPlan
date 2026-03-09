@@ -21,10 +21,16 @@ namespace MrezaCuttingPlan.Models
         public string Partition { get; set; } = string.Empty;
 
         /// <summary>
-        /// Težina mreže u kg/m² pročitana iz Revit FabricSheetType.
-        /// 0 = parametar nije pronađen, koristiti aproksimativnu formulu.
+        /// Ukupna težina jednog standardnog lima ovog tipa u kg (iz "Sheet Mass").
+        /// 0 = parametar nije pronađen.
         /// </summary>
-        public double WeightKgPerM2 { get; set; }
+        public double WeightKgSheet { get; set; }
+
+        /// <summary>
+        /// Revit "Fabric Number" parametar instance (npr. "I-3", "P1-A").
+        /// Prazno ako parametar nije postavljen.
+        /// </summary>
+        public string FabricNumber { get; set; } = string.Empty;
 
         /// <summary>
         /// True za Q mreže (mogu se rotirati 90°),

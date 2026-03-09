@@ -27,9 +27,10 @@ namespace MrezaCuttingPlan.Services
                 if (!IsPlaced(sheet, doc))
                     continue;
 
+
                 string typeName = GetTypeName(sheet, doc);
-                double widthCm = GetDimension(sheet, BuiltInParameter.FABRIC_SHEET_WIDTH, doc);
-                double lengthCm = GetDimension(sheet, BuiltInParameter.FABRIC_SHEET_LENGTH, doc);
+                double widthCm  = GetCutDimension(sheet, doc, isWidth: true);
+                double lengthCm = GetCutDimension(sheet, doc, isWidth: false);
 
                 // Preskoči ako nema validnih dimenzija
                 if (widthCm <= 0 || lengthCm <= 0)
@@ -37,17 +38,18 @@ namespace MrezaCuttingPlan.Services
 
                 bool canRotate = typeName.StartsWith("Q", StringComparison.OrdinalIgnoreCase);
                 string partition = GetPartition(sheet, doc);
-                double weightKgPerM2 = GetWeightKgPerM2(sheet, doc, widthCm, lengthCm);
+                double weightKgSheet = GetSheetMassKg(sheet, doc);
 
                 result.Add(new MeshPiece
                 {
-                    RevitId = (int)sheet.Id.Value,
-                    TypeName = typeName,
-                    Width = widthCm,
-                    Length = lengthCm,
-                    CanRotate = canRotate,
-                    Partition = partition,
-                    WeightKgPerM2 = weightKgPerM2
+                    RevitId       = (int)sheet.Id.Value,
+                    TypeName      = typeName,
+                    Width         = widthCm,
+                    Length        = lengthCm,
+                    CanRotate     = canRotate,
+                    Partition     = partition,
+                    WeightKgSheet = weightKgSheet,
+                    FabricNumber  = GetFabricNumber(sheet)
                 });
             }
 
@@ -90,66 +92,50 @@ namespace MrezaCuttingPlan.Services
         }
 
         /// <summary>
-        /// Čita težinu mreže iz Revit parametara FabricSheetType ili FabricSheet instance.
-        ///
-        /// Prioritet:
-        ///   1. "Sheet Mass"              → ukupna težina lima (kg), dijeli s površinom
-        ///   2. "Sheet mass per unit area"→ već kg/m², koristi direktno
-        ///   3. Ostali uobičajeni nazivi  → heuristika za kg vs kg/m²
-        ///
-        /// Vraća kg/m² ili 0 ako parametar nije pronađen (tada se koristi formula).
+        /// Čita "Sheet Mass" iz FabricSheetType type properties.
+        /// Vraća ukupnu težinu jednog standardnog lima u kg, ili 0 ako nije pronađen.
         /// </summary>
-        private static double GetWeightKgPerM2(FabricSheet sheet, Document doc,
-            double widthCm, double lengthCm)
+        private static double GetSheetMassKg(FabricSheet sheet, Document doc)
         {
-            double areaM2 = (widthCm / 100.0) * (lengthCm / 100.0);
-            if (areaM2 <= 0) return 0;
-
             try
             {
                 var sheetType = doc.GetElement(sheet.GetTypeId()) as FabricSheetType;
+                if (sheetType == null) return 0;
 
-                // ── 1. "Sheet Mass" = ukupna težina cijelog lima ──────────────────
-                // Gledamo na tipu i na instanci (user parametar može biti na oba mjesta)
-                double sheetMass = ReadDouble(sheetType, "Sheet Mass")
-                               ?? ReadDouble(sheet, "Sheet Mass")
-                               ?? 0;
-                if (sheetMass > 0)
+                double? val = ReadDouble(sheetType, "Sheet Mass")
+                           ?? ReadDouble(sheet, "Sheet Mass");
+                return val ?? 0;
+            }
+            catch { }
+            return 0;
+        }
+
+        /// <summary>
+        /// Čita "Fabric Number" instance parametar. Vraća prazno ako nije postavljen.
+        /// Redoslijed pokušaja: instance "Fabric Number" → instance "Mark".
+        /// </summary>
+        private static string GetFabricNumber(FabricSheet sheet)
+        {
+            try
+            {
+                // 1. Instance parametar "Fabric Number" (po imenu)
+                var p = sheet.LookupParameter("Fabric Number");
+                if (p != null && p.HasValue && p.StorageType == StorageType.String)
                 {
-                    // "Sheet Mass" je ukupna kg – trebamo kg/m²
-                    // Ako je Revit interni (lb → kg konverzija 0.4536): val < 5 za tipičnu mrežu
-                    // U praksi user unosi u kg kao Number ili Mass param → val ≈ 30-500
-                    double kg = sheetMass > 5
-                        ? sheetMass                    // Number parametar, već kg
-                        : sheetMass * 453.592;         // slug ili lb – konvertuj u kg (edge case)
-                    return kg / areaM2;
+                    string val = p.AsString();
+                    if (!string.IsNullOrWhiteSpace(val)) return val.Trim();
                 }
 
-                // ── 2. "Sheet mass per unit area" = kg/m² (Revit ga računa) ───────
-                double perM2 = ReadDouble(sheetType, "Sheet mass per unit area")
-                            ?? ReadDouble(sheet, "Sheet mass per unit area")
-                            ?? 0;
-                if (perM2 > 0)
+                // 2. Fallback: standardni "Mark" parametar
+                var mark = sheet.get_Parameter(BuiltInParameter.ALL_MODEL_MARK);
+                if (mark != null && mark.HasValue && mark.StorageType == StorageType.String)
                 {
-                    // Ako je Revit interni (lb/ft² → kg/m² faktor 4.882): val < 3 za tipičnu mrežu
-                    return perM2 > 3 ? perM2 : perM2 * 4.88243;
-                }
-
-                // ── 3. Fallback: ostali uobičajeni nazivi ─────────────────────────
-                string[] totalKgNames = { "Weight", "Težina", "Masa", "Mass", "Sheet Weight", "Total Weight" };
-                foreach (string name in totalKgNames)
-                {
-                    double val = ReadDouble(sheetType, name) ?? ReadDouble(sheet, name) ?? 0;
-                    if (val <= 0) continue;
-
-                    if (val > 15) return val / areaM2;   // ukupna kg
-                    if (val > 1)  return val;             // kg/m²
-                    if (val > 0.1) return val * 4.88243; // lb/ft²
+                    string val = mark.AsString();
+                    if (!string.IsNullOrWhiteSpace(val)) return val.Trim();
                 }
             }
             catch { }
-
-            return 0;
+            return string.Empty;
         }
 
         /// <summary>Čita Double parametar s elementa po nazivu. Null ako nije pronađen ili je 0.</summary>
@@ -166,29 +152,59 @@ namespace MrezaCuttingPlan.Services
         {
             try
             {
+                // 1. Direktno na FabricSheet instanci (NUMBER_PARTITION_PARAM)
+                var p = sheet.get_Parameter(BuiltInParameter.NUMBER_PARTITION_PARAM);
+                if (p != null && p.HasValue)
+                {
+                    string val = p.StorageType == StorageType.String
+                        ? p.AsString()
+                        : p.AsInteger().ToString();
+                    if (!string.IsNullOrWhiteSpace(val))
+                        return val;
+                }
+
+                // 2. Na host FabricArea elementu
                 if (sheet.HostId != ElementId.InvalidElementId)
                 {
                     var host = doc.GetElement(sheet.HostId);
-                    var p = host?.LookupParameter("PARTITION");
-                    if (p != null && p.HasValue)
-                        return p.AsString() ?? string.Empty;
+                    if (host != null)
+                    {
+                        var ph = host.get_Parameter(BuiltInParameter.NUMBER_PARTITION_PARAM);
+                        if (ph != null && ph.HasValue)
+                        {
+                            string val = ph.StorageType == StorageType.String
+                                ? ph.AsString()
+                                : ph.AsInteger().ToString();
+                            if (!string.IsNullOrWhiteSpace(val))
+                                return val;
+                        }
+                    }
                 }
             }
             catch { }
             return "Bez particije";
         }
 
-        private static double GetDimension(FabricSheet sheet, BuiltInParameter param, Document doc)
+        /// <summary>
+        /// Čita stvarnu placed/cut dimenziju FabricSheet instance.
+        /// Koristi "Cut Overall Width" / "Cut Overall Length" instance parametre.
+        /// </summary>
+        private static double GetCutDimension(FabricSheet sheet, Document doc, bool isWidth)
         {
+            // 1. "Cut Overall Width" / "Cut Overall Length" – stvarne cut dimenzije instance
+            string paramName = isWidth ? "Cut Overall Width" : "Cut Overall Length";
             try
             {
-                var p = sheet.get_Parameter(param);
-                if (p != null && p.HasValue)
-                    return UnitConverter.FeetToCm(p.AsDouble());
+                var p = sheet.LookupParameter(paramName);
+                if (p != null && p.HasValue && p.StorageType == StorageType.Double)
+                {
+                    double val = UnitConverter.FeetToCm(p.AsDouble());
+                    if (val > 1) return val;
+                }
             }
             catch { }
 
-            // Fallback na BoundingBox dimenzije
+            // 2. Fallback: BoundingBox (za direktno placed sheets)
             try
             {
                 var bb = sheet.get_BoundingBox(null);
@@ -196,11 +212,26 @@ namespace MrezaCuttingPlan.Services
                 {
                     double dx = UnitConverter.FeetToCm(bb.Max.X - bb.Min.X);
                     double dy = UnitConverter.FeetToCm(bb.Max.Y - bb.Min.Y);
+                    if (dx > 5 && dy > 5)
+                        return isWidth ? Math.Min(dx, dy) : Math.Max(dx, dy);
+                }
+            }
+            catch { }
 
-                    if (param == BuiltInParameter.FABRIC_SHEET_WIDTH)
-                        return Math.Min(dx, dy);
-                    else
-                        return Math.Max(dx, dy);
+            // 3. Fallback: tip mreže (kataloška dimenzija)
+            try
+            {
+                if (doc.GetElement(sheet.GetTypeId()) is FabricSheetType sheetType)
+                {
+                    var builtIn = isWidth
+                        ? BuiltInParameter.FABRIC_SHEET_WIDTH
+                        : BuiltInParameter.FABRIC_SHEET_LENGTH;
+                    var tp = sheetType.get_Parameter(builtIn);
+                    if (tp != null && tp.HasValue)
+                    {
+                        double val = UnitConverter.FeetToCm(tp.AsDouble());
+                        if (val > 1) return val;
+                    }
                 }
             }
             catch { }

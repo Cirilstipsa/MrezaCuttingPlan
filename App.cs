@@ -10,11 +10,10 @@ namespace MrezaCuttingPlan
         {
             try
             {
-                string tabName = "Add-Ins";
                 string panelName = "Armatura";
 
                 RibbonPanel? panel = null;
-                foreach (var p in application.GetRibbonPanels(tabName))
+                foreach (var p in application.GetRibbonPanels())
                 {
                     if (p.Name == panelName)
                     {
@@ -22,7 +21,7 @@ namespace MrezaCuttingPlan
                         break;
                     }
                 }
-                panel ??= application.CreateRibbonPanel(tabName, panelName);
+                panel ??= application.CreateRibbonPanel(panelName);
 
                 string assemblyPath = Assembly.GetExecutingAssembly().Location;
 

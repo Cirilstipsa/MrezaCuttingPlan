@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Plan Rezanja Mreža – Postavke"
-        Width="460" Height="280"
+        Width="420" Height="250"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         ShowInTaskbar="False">
@@ -13,19 +13,17 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="180"/>
+            <ColumnDefinition Width="200"/>
             <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
 
         <!-- Naslov -->
-        <TextBlock Grid.Row="0" Grid.ColumnSpan="3"
-                   Text="Standardni lim i putanja PDF izvještaja"
+        <TextBlock Grid.Row="0" Grid.ColumnSpan="2"
+                   Text="Dimenzije standardnog lima"
                    FontWeight="Bold" FontSize="13"
                    Margin="0,0,0,15"/>
 
@@ -33,7 +31,7 @@
         <TextBlock Grid.Row="1" Grid.Column="0"
                    Text="Širina standardnog lima (cm):"
                    VerticalAlignment="Center" Margin="0,5"/>
-        <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+        <TextBox Grid.Row="1" Grid.Column="1"
                  x:Name="TxtSheetWidth"
                  Text="215"
                  Padding="5,3"
@@ -44,7 +42,7 @@
         <TextBlock Grid.Row="2" Grid.Column="0"
                    Text="Dužina standardnog lima (cm):"
                    VerticalAlignment="Center" Margin="0,5"/>
-        <TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+        <TextBox Grid.Row="2" Grid.Column="1"
                  x:Name="TxtSheetLength"
                  Text="600"
                  Padding="5,3"
@@ -53,35 +51,31 @@
 
         <!-- PDF putanja -->
         <TextBlock Grid.Row="3" Grid.Column="0"
-                   Text="Putanja PDF izvještaja:"
+                   Text="PDF izlaz (opcionalno):"
                    VerticalAlignment="Center" Margin="0,5"/>
-        <TextBox Grid.Row="3" Grid.Column="1"
-                 x:Name="TxtPdfPath"
-                 Padding="5,3"
-                 Margin="0,5,5,5"
-                 VerticalAlignment="Center"
-                 IsReadOnly="True"/>
-        <Button Grid.Row="3" Grid.Column="2"
-                Content="Pretraži..."
-                Padding="8,3"
-                Margin="0,5"
-                Click="BtnBrowse_Click"/>
-
-        <!-- Napomena -->
-        <TextBlock Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3"
-                   Text="Napomena: R-mreže se ne rotiraju (smjer žica). Q-mreže se mogu rotirati za 90°."
-                   FontStyle="Italic" FontSize="10"
-                   Foreground="Gray"
-                   TextWrapping="Wrap"
-                   Margin="0,10,0,0"/>
+        <Grid Grid.Row="3" Grid.Column="1" Margin="0,5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="TxtPdfPath"
+                     Grid.Column="0"
+                     Padding="5,3"
+                     VerticalAlignment="Center"/>
+            <Button Grid.Column="1"
+                    Content="..."
+                    Width="30" Margin="4,0,0,0"
+                    Padding="0,3"
+                    Click="BtnBrowse_Click"/>
+        </Grid>
 
         <!-- Gumbi -->
-        <StackPanel Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="3"
+        <StackPanel Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,15,0,0">
             <Button x:Name="BtnOk"
-                    Content="Generiraj"
+                    Content="Izračunaj"
                     Width="100" Padding="0,5"
                     Margin="0,0,10,0"
                     IsDefault="True"

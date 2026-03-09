@@ -1,4 +1,5 @@
 using Autodesk.Revit.DB;
+using System.Globalization;
 
 namespace MrezaCuttingPlan.Services
 {
@@ -9,15 +10,14 @@ namespace MrezaCuttingPlan.Services
     public class RevitViewExporter
     {
         // ── Fiksne dimenzije tablice (mm) ────────────────────────────────────────
-        // Ukupno 185 mm (A4 210 mm − 2×12.5 mm margine)
-        private const double Col0Mm = 75;  // Particija
-        private const double Col1Mm = 35;  // Tip mreže
-        private const double Col2Mm = 25;  // Limovi
+        private const double Col0Mm = 60;  // Particija
+        private const double Col1Mm = 50;  // Tip mreže
+        private const double Col2Mm = 25;  // Komada
         private const double Col3Mm = 50;  // Težina (kg)
         // Ukupno: 75+35+25+50 = 185 mm
 
-        private const double PadXMm = 2.0; // horizontalni padding unutar ćelije
-        private const double MinRowMm = 7.0; // minimalna visina reda
+        private const double PadXMm  = 2.0;
+        private const double MinRowMm = 7.0;
 
         private static double MmToFt(double mm) => mm / 304.8;
 
@@ -25,14 +25,11 @@ namespace MrezaCuttingPlan.Services
 
         public static void Export(
             Document doc,
-            IEnumerable<(string Partition, string TypeName, int SheetCount, double WeightKgPerM2)> rows,
-            double sheetWCm, double sheetLCm)
+            IEnumerable<(string Partition, string TypeName, int StandardSheets, int PieceCount, double TotalWeightKg)> rows,
+            double sheetWidthCm, double sheetLengthCm)
         {
             var rowList = rows.ToList();
 
-            // Pronađi postojeći view PRIJE transakcije –
-            // FilteredElementCollector scoped na view.Id ne smije se koristiti
-            // unutar iste transakcije u kojoj je view kreiran.
             var existingView = FindExistingDraftingView(doc);
 
             using var tx = new Transaction(doc, "Kreiraj Plan Rezanja Mreža view");
@@ -42,9 +39,7 @@ namespace MrezaCuttingPlan.Services
             if (existingView != null)
             {
                 view = existingView;
-                // Postavi scale na 1:1 (model coords = paper coords)
-                if (view.Scale != 1)
-                    view.Scale = 1;
+                if (view.Scale != 1) view.Scale = 1;
 
                 var idsToDelete = new FilteredElementCollector(doc, view.Id)
                     .WhereElementIsNotElementType()
@@ -60,7 +55,7 @@ namespace MrezaCuttingPlan.Services
                 view = CreateDraftingView(doc);
             }
 
-            DrawTable(doc, view, rowList, sheetWCm, sheetLCm);
+            DrawTable(doc, view, rowList, sheetWidthCm, sheetLengthCm);
             tx.Commit();
         }
 
@@ -81,7 +76,7 @@ namespace MrezaCuttingPlan.Services
                 .Id;
             var v = ViewDrafting.Create(doc, typeId);
             v.Name = "Plan Rezanja Mreža";
-            v.Scale = 1; // 1:1 → model koordinate = paper koordinate
+            v.Scale = 1;
             return v;
         }
 
@@ -90,19 +85,15 @@ namespace MrezaCuttingPlan.Services
         private static void DrawTable(
             Document doc,
             ViewDrafting view,
-            List<(string Partition, string TypeName, int SheetCount, double WeightKgPerM2)> rows,
-            double sheetWCm, double sheetLCm)
+            List<(string Partition, string TypeName, int StandardSheets, int PieceCount, double TotalWeightKg)> rows,
+            double sheetWidthCm, double sheetLengthCm)
         {
             ElementId textTypeId = GetTextTypeId(doc);
-            double th = GetTextHeight(doc, textTypeId); // visina teksta u feet
-
-            // Visina reda: dovoljno za tekst + padding, ali ne manje od MinRowMm
+            double th   = GetTextHeight(doc, textTypeId);
             double rowH = Math.Max(th * 2.5, MmToFt(MinRowMm));
-            // Vertikalni padding: centrira tekst unutar reda
             double padY = (rowH - th) / 2.0;
             double padX = MmToFt(PadXMm);
 
-            // X granice kolona (u feet)
             double x0 = 0;
             double x1 = x0 + MmToFt(Col0Mm);
             double x2 = x1 + MmToFt(Col1Mm);
@@ -115,22 +106,23 @@ namespace MrezaCuttingPlan.Services
             DrawHLine(doc, view, x0, x4, 0);
             PlaceText(doc, view, textTypeId, x0 + padX, -padY, "Particija");
             PlaceText(doc, view, textTypeId, x1 + padX, -padY, "Tip mreže");
-            PlaceText(doc, view, textTypeId, x2 + padX, -padY, "Limovi");
+            PlaceText(doc, view, textTypeId, x2 + padX, -padY, "Br. komada");
             PlaceText(doc, view, textTypeId, x3 + padX, -padY, "Težina (kg)");
             DrawHLine(doc, view, x0, x4, -rowH);
 
             // ── Data redovi ───────────────────────────────────────────────────────
             for (int i = 0; i < rows.Count; i++)
             {
-                var (partition, typeName, sheetCount, weightKgPerM2) = rows[i];
+                var (partition, typeName, _, pieceCount, totalWeightKg) = rows[i];
                 double rowTop = -(i + 1) * rowH;
                 double textY  = rowTop - padY;
-                double weight = CalcWeight(typeName, sheetCount, sheetWCm, sheetLCm, weightKgPerM2);
+
+                string typeDisplay = $"{typeName} ({sheetLengthCm:F0}×{sheetWidthCm:F0} cm)";
 
                 PlaceText(doc, view, textTypeId, x0 + padX, textY, partition);
-                PlaceText(doc, view, textTypeId, x1 + padX, textY, typeName);
-                PlaceText(doc, view, textTypeId, x2 + padX, textY, sheetCount.ToString());
-                PlaceText(doc, view, textTypeId, x3 + padX, textY, $"{weight:F0}");
+                PlaceText(doc, view, textTypeId, x1 + padX, textY, typeDisplay);
+                PlaceText(doc, view, textTypeId, x2 + padX, textY, pieceCount.ToString());
+                PlaceText(doc, view, textTypeId, x3 + padX, textY, FormatWeight(totalWeightKg));
 
                 DrawHLine(doc, view, x0, x4, rowTop - rowH);
             }
@@ -141,26 +133,86 @@ namespace MrezaCuttingPlan.Services
             DrawVLine(doc, view, x2, 0, -tableH);
             DrawVLine(doc, view, x3, 0, -tableH);
             DrawVLine(doc, view, x4, 0, -tableH);
+
+            // ── Rekapitulacijska tablica ──────────────────────────────────────────
+            DrawRecapTable(doc, view, textTypeId, rows, rowH, padX, padY, -tableH - rowH, sheetWidthCm, sheetLengthCm);
         }
 
-        /// <summary>
-        /// Kreira TextNote koristeći 5-parametarski overload (bez rotacije i bez
-        /// forsiranja širine). Y koordinata = gornji rub teksta.
-        /// VAŽNO: ne koristiti overload s double parametrom – to je rotacija u
-        /// radijanima, NE širina, što bi rotiralo tekst.
-        /// </summary>
+        private static void DrawRecapTable(
+            Document doc, ViewDrafting view, ElementId textTypeId,
+            List<(string Partition, string TypeName, int StandardSheets, int PieceCount, double TotalWeightKg)> rows,
+            double rowH, double padX, double padY,
+            double startY, double sheetWidthCm, double sheetLengthCm)
+        {
+            double rx0 = 0;
+            double rx1 = rx0 + MmToFt(Col0Mm + Col1Mm); // 110 mm – Tip mreže
+            double rx2 = rx1 + MmToFt(Col2Mm);           // 25 mm  – Br. komada
+            double rx3 = rx2 + MmToFt(Col3Mm);           // 50 mm  – Težina
+
+            // Grupiraj po tipu mreže – zbroji sve particije
+            var recap = rows
+                .GroupBy(r => r.TypeName)
+                .Select(g => (
+                    TypeName: g.Key,
+                    PieceCount: g.Sum(r => r.PieceCount),
+                    TotalWeightKg: g.Sum(r => r.TotalWeightKg)
+                ))
+                .OrderBy(r => r.TypeName)
+                .ToList();
+
+            double totalWeight    = recap.Sum(r => r.TotalWeightKg);
+            int    totalPieces    = recap.Sum(r => r.PieceCount);
+            double recapH         = rowH * (recap.Count + 2); // header + data + ukupno
+
+            // Naslov
+            PlaceText(doc, view, textTypeId, rx0 + padX, startY - padY, "REKAPITULACIJA – NARUDŽBA MREŽA");
+
+            double tableStartY = startY - rowH;
+
+            // Header
+            DrawHLine(doc, view, rx0, rx3, tableStartY);
+            PlaceText(doc, view, textTypeId, rx0 + padX, tableStartY - padY, "Tip mreže");
+            PlaceText(doc, view, textTypeId, rx1 + padX, tableStartY - padY, "Br. komada");
+            PlaceText(doc, view, textTypeId, rx2 + padX, tableStartY - padY, "Težina (kg)");
+            DrawHLine(doc, view, rx0, rx3, tableStartY - rowH);
+
+            // Data redovi
+            for (int i = 0; i < recap.Count; i++)
+            {
+                var (typeName, pieceCount, weightKg) = recap[i];
+                double rowTop = tableStartY - (i + 1) * rowH;
+                string typeDisplay = $"{typeName} ({sheetLengthCm:F0}×{sheetWidthCm:F0} cm)";
+                PlaceText(doc, view, textTypeId, rx0 + padX, rowTop - padY, typeDisplay);
+                PlaceText(doc, view, textTypeId, rx1 + padX, rowTop - padY, pieceCount.ToString());
+                PlaceText(doc, view, textTypeId, rx2 + padX, rowTop - padY, FormatWeight(weightKg));
+                DrawHLine(doc, view, rx0, rx3, rowTop - rowH);
+            }
+
+            // Ukupno red
+            double totalTop = tableStartY - (recap.Count + 1) * rowH;
+            PlaceText(doc, view, textTypeId, rx0 + padX, totalTop - padY, "UKUPNO");
+            PlaceText(doc, view, textTypeId, rx1 + padX, totalTop - padY, totalPieces.ToString());
+            PlaceText(doc, view, textTypeId, rx2 + padX, totalTop - padY, FormatWeight(totalWeight));
+            DrawHLine(doc, view, rx0, rx3, totalTop - rowH);
+
+            // Vertikalne linije
+            DrawVLine(doc, view, rx0, tableStartY, tableStartY - recapH);
+            DrawVLine(doc, view, rx1, tableStartY, tableStartY - recapH);
+            DrawVLine(doc, view, rx2, tableStartY, tableStartY - recapH);
+            DrawVLine(doc, view, rx3, tableStartY, tableStartY - recapH);
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────────
+
         private static void PlaceText(
             Document doc, ViewDrafting view, ElementId typeId,
             double x, double y, string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return;
-
             var opts = new TextNoteOptions(typeId)
             {
                 HorizontalAlignment = HorizontalTextAlignment.Left
             };
-
-            // 5-param overload: Create(doc, viewId, origin, text, opts)
             TextNote.Create(doc, view.Id, new XYZ(x, y, 0), text, opts);
         }
 
@@ -174,8 +226,6 @@ namespace MrezaCuttingPlan.Services
             doc.Create.NewDetailCurve(view,
                 Line.CreateBound(new XYZ(x, yTop, 0), new XYZ(x, yBottom, 0)));
 
-        // ── TextNoteType helpers ──────────────────────────────────────────────────
-
         private static ElementId GetTextTypeId(Document doc)
         {
             var types = new FilteredElementCollector(doc)
@@ -184,10 +234,8 @@ namespace MrezaCuttingPlan.Services
                 .ToList();
 
             if (types.Count == 0)
-                throw new InvalidOperationException(
-                    "Dokument ne sadrži nijedan TextNoteType.");
+                throw new InvalidOperationException("Dokument ne sadrži nijedan TextNoteType.");
 
-            // Najmanji dostupni tip
             return types
                 .OrderBy(t =>
                 {
@@ -204,33 +252,12 @@ namespace MrezaCuttingPlan.Services
             {
                 var p = tnt.get_Parameter(BuiltInParameter.TEXT_SIZE);
                 if (p != null && p.HasValue && p.AsDouble() > 0)
-                    return p.AsDouble(); // interni Revit units (feet)
+                    return p.AsDouble();
             }
-            return MmToFt(2.5); // fallback
+            return MmToFt(2.5);
         }
 
-        // ── Weight calculation ────────────────────────────────────────────────────
-
-        private static double CalcWeight(
-            string typeName, int sheetCount,
-            double sheetWCm, double sheetLCm,
-            double weightKgPerM2)
-        {
-            double areaM2 = (sheetWCm / 100.0) * (sheetLCm / 100.0);
-
-            // Koristi podatak iz Revit famile ako je dostupan
-            if (weightKgPerM2 > 0)
-                return sheetCount * areaM2 * weightKgPerM2;
-
-            // Fallback: aproksimativna formula (As × gustoća)
-            string digits = new string(typeName.Where(char.IsDigit).ToArray());
-            if (!int.TryParse(digits, out int num)) return 0;
-
-            double kgPerM2 = typeName.StartsWith("Q", StringComparison.OrdinalIgnoreCase)
-                ? num * 2 * 7.85 / 1000.0      // Q: oba smjera
-                : num * 1.15 * 7.85 / 1000.0;  // R: glavni + distribucija
-
-            return sheetCount * areaM2 * kgPerM2;
-        }
+        private static string FormatWeight(double kg) =>
+            kg.ToString("N2", new CultureInfo("hr-HR"));
     }
 }

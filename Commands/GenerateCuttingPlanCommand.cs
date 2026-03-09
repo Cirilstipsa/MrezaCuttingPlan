@@ -83,16 +83,39 @@ namespace MrezaCuttingPlan.Commands
                 }
 
                 // 5. Kreiraj Drafting View tablicu
-                // WeightKgPerM2: uzimamo prvu pozitivnu vrijednost iz grupe
-                // (svi komadi iste grupe imaju isti FabricSheetType → isti weight).
-                // Ako nijedan nema weight iz Revita (= 0), exporter koristi formulu.
                 var tableRows = resultsByType
                     .Select(kvp =>
                     {
-                        double wKgM2 = grouped[kvp.Key]
-                            .Select(p => p.WeightKgPerM2)
-                            .FirstOrDefault(w => w > 0);
-                        return (kvp.Key.Partition, kvp.Key.TypeName, kvp.Value.Count, wKgM2);
+                        var pieces = grouped[kvp.Key];
+                        int standardSheets = kvp.Value.Count;
+                        double weightKgSheet = pieces.Select(p => p.WeightKgSheet).FirstOrDefault(w => w > 0);
+
+                        // Težina = broj standardnih limova × težina jednog standardnog lima
+                        double totalWeightKg;
+                        if (weightKgSheet > 0)
+                        {
+                            totalWeightKg = standardSheets * weightKgSheet;
+                        }
+                        else
+                        {
+                            // Fallback: aproksimativna formula
+                            string typeName = kvp.Key.TypeName;
+                            string digits = new string(typeName.Where(char.IsDigit).ToArray());
+                            if (int.TryParse(digits, out int num))
+                            {
+                                double areaM2 = (sheetW / 100.0) * (sheetL / 100.0);
+                                double kgPerM2 = typeName.StartsWith("Q", StringComparison.OrdinalIgnoreCase)
+                                    ? num * 2 * 7.85 / 1000.0
+                                    : num * 1.15 * 7.85 / 1000.0;
+                                totalWeightKg = standardSheets * areaM2 * kgPerM2;
+                            }
+                            else totalWeightKg = 0;
+                        }
+
+                        return (kvp.Key.Partition, kvp.Key.TypeName,
+                                StandardSheets: standardSheets,
+                                PieceCount: pieces.Count,
+                                TotalWeightKg: totalWeightKg);
                     })
                     .OrderBy(r => r.Partition)
                     .ThenBy(r => r.TypeName)
@@ -100,10 +123,24 @@ namespace MrezaCuttingPlan.Commands
 
                 RevitViewExporter.Export(doc, tableRows, sheetW, sheetL);
 
-                // 6. Prikazi summary u dijalogu
+                // 6. Naziv projekta (potreban za PDF i summary)
                 string projectName = Path.GetFileNameWithoutExtension(doc.PathName);
                 if (string.IsNullOrWhiteSpace(projectName))
                     projectName = "Neimenovani projekt";
+
+                // 7. PDF export (ako je putanja unesena)
+                if (!string.IsNullOrWhiteSpace(dialog.PdfOutputPath))
+                {
+                    try
+                    {
+                        PdfExporter.Export(resultsByType, projectName, dialog.PdfOutputPath, sheetW, sheetL);
+                    }
+                    catch (Exception pdfEx)
+                    {
+                        TaskDialog.Show("PDF – Upozorenje",
+                            $"Plan rezanja je kreiran u Revitu, ali PDF export nije uspio:\n\n{pdfEx.Message}");
+                    }
+                }
 
                 int totalPieces = grouped.Values.Sum(l => l.Count);
                 int totalSheets = resultsByType.Values.Sum(l => l.Count);
@@ -126,6 +163,14 @@ namespace MrezaCuttingPlan.Commands
                 }
 
                 summary += "\nView 'Plan Rezanja Mreža' kreiran u Project Browser-u.";
+
+                // Debug: prikaži sve ekstrahirane tipove (za dijagnostiku nestajućih tipova)
+                var allTypes = allPieces
+                    .GroupBy(p => (p.Partition, p.TypeName))
+                    .Select(g => $"  {g.Key.Partition} / {g.Key.TypeName}: {g.Count()} kom (dim: {g.First().Width:F0}×{g.First().Length:F0})")
+                    .OrderBy(s => s);
+                string debugInfo = "SVI EKSTR. KOMADI:\n" + string.Join("\n", allTypes);
+                TaskDialog.Show("Debug – Ekstrahirani komadi", debugInfo);
 
                 TaskDialog.Show("Plan Rezanja Mreža – Rezultat", summary);
 
